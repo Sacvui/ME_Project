@@ -12,6 +12,22 @@ const Marker = dynamic(() => import('react-leaflet').then((mod) => mod.Marker), 
 const Popup = dynamic(() => import('react-leaflet').then((mod) => mod.Popup), { ssr: false });
 const Circle = dynamic(() => import('react-leaflet').then((mod) => mod.Circle), { ssr: false });
 
+const PROVINCES = [
+  "TP. Hồ Chí Minh", "Hà Nội", "Đà Nẵng", "Hải Phòng", "Cần Thơ",
+  "An Giang", "Bà Rịa - Vũng Tàu", "Bạc Liêu", "Bắc Giang", "Bắc Kạn",
+  "Bắc Ninh", "Bến Tre", "Bình Dương", "Bình Định", "Bình Phước",
+  "Bình Thuận", "Cà Mau", "Cao Bằng", "Đắk Lắk", "Đắk Nông",
+  "Điện Biên", "Đồng Nai", "Đồng Tháp", "Gia Lai", "Hà Giang",
+  "Hà Nam", "Hà Tĩnh", "Hải Dương", "Hậu Giang", "Hòa Bình",
+  "Hưng Yên", "Khánh Hòa", "Kiên Giang", "Kon Tum", "Lai Châu",
+  "Lâm Đồng", "Lạng Sơn", "Lào Cai", "Long An", "Nam Định",
+  "Nghệ An", "Ninh Bình", "Ninh Thuận", "Phú Thọ", "Phú Yên",
+  "Quảng Bình", "Quảng Nam", "Quảng Ngãi", "Quảng Ninh", "Quảng Trị",
+  "Sóc Trăng", "Sơn La", "Tây Ninh", "Thái Bình", "Thái Nguyên",
+  "Thanh Hóa", "Thừa Thiên Huế", "Tiền Giang", "Trà Vinh", "Tuyên Quang",
+  "Vĩnh Long", "Vĩnh Phúc", "Yên Bái"
+];
+
 export default function WhiteSpacePage() {
   const [whiteSpaces, setWhiteSpaces] = useState([]);
   const [customers, setCustomers] = useState([]);
@@ -20,7 +36,7 @@ export default function WhiteSpacePage() {
   const [L, setL] = useState<any>(null);
   
   // Filter States
-  const [province, setProvince] = useState('');
+  const [province, setProvince] = useState('TP. Hồ Chí Minh');
   const [district, setDistrict] = useState('');
   
   const [flyToLoc, setFlyToLoc] = useState<{lat: number, lng: number, zoom?: number} | null>(null);
@@ -135,7 +151,7 @@ export default function WhiteSpacePage() {
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-md transition-colors"
               >
                 <Upload className="w-3.5 h-3.5" />
-                Import Dữ liệu nền
+                Import Dữ liệu nội bộ
               </button>
               <button 
                 onClick={() => openUploadModal('market_leads')}
@@ -152,7 +168,7 @@ export default function WhiteSpacePage() {
             
             <select value={province} onChange={(e) => setProvince(e.target.value)} className="text-sm bg-white dark:bg-zinc-900 border border-gray-300 dark:border-zinc-600 rounded-md px-2 py-1 outline-none text-gray-900 dark:text-white">
               <option value="">Tất cả Tỉnh/Thành</option>
-              <option value="TP. Hồ Chí Minh">TP. Hồ Chí Minh</option>
+              {PROVINCES.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
             
             <select value={district} onChange={(e) => setDistrict(e.target.value)} className="text-sm bg-white dark:bg-zinc-900 border border-gray-300 dark:border-zinc-600 rounded-md px-2 py-1 outline-none text-gray-900 dark:text-white">
@@ -200,7 +216,7 @@ export default function WhiteSpacePage() {
                   <Marker position={[cust.lat, cust.lng]} icon={custIcon}>
                     <Popup>
                       <div className="p-1 min-w-[200px]">
-                        <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded uppercase mb-2 inline-block">Dữ liệu nền</span>
+                        <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded uppercase mb-2 inline-block">Dữ liệu nội bộ</span>
                         <p className="font-bold text-gray-900 text-base mb-1">{cust.name}</p>
                         <p className="text-gray-600 text-sm">{cust.address}</p>
                       </div>
@@ -275,7 +291,7 @@ export default function WhiteSpacePage() {
         </div>
 
         <div className="p-4 bg-gray-50 dark:bg-zinc-950 border-t border-gray-200 dark:border-zinc-800 flex justify-between items-center text-xs text-gray-500">
-          <span>Dữ liệu nền: {customers.length}</span>
+          <span>Dữ liệu nội bộ: {customers.length}</span>
           <span>Universal: {whiteSpaces.length}</span>
         </div>
       </div>
@@ -283,7 +299,7 @@ export default function WhiteSpacePage() {
       <UploadModal 
         isOpen={isUploadModalOpen} 
         onClose={() => setIsUploadModalOpen(false)} 
-        title={uploadType === 'customers' ? 'Import Dữ liệu nền (Base Data)' : 'Import Dữ liệu Universal (Thị trường)'}
+        title={uploadType === 'customers' ? 'Import Dữ liệu nội bộ' : 'Import Dữ liệu Universal (Thị trường)'}
         type={uploadType}
         onSuccess={() => {
           setIsUploadModalOpen(false);

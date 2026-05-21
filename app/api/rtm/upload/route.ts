@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     // Giả lập thời gian xử lý file
     await new Promise(resolve => setTimeout(resolve, 1000));
 
-    const tableName = type === 'customers' ? 'Dữ liệu nền' : 'Dữ liệu Universal';
+    const tableName = type === 'customers' ? 'Dữ liệu nội bộ' : 'Dữ liệu Universal';
 
     return NextResponse.json({ 
       success: true, 

@@ -84,7 +84,7 @@ export default function UploadModal({ isOpen, onClose, title, type, onSuccess }:
         {/* Body */}
         <div className="p-6">
           <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-            Vui lòng tải lên file định dạng <strong>.csv</strong> hoặc <strong>.json</strong>. Đảm bảo file có chứa cột <code>lat</code> (vĩ độ) và <code>lng</code> (kinh độ).
+            Vui lòng tải lên file định dạng <strong>.csv</strong> hoặc <strong>.xlsx / .xls</strong>. Đảm bảo file có chứa cột <code>lat</code> (vĩ độ) và <code>lng</code> (kinh độ).
           </p>
 
           <label className={`
@@ -107,14 +107,14 @@ export default function UploadModal({ isOpen, onClose, title, type, onSuccess }:
                   <p className="mb-1 text-sm text-gray-600 dark:text-gray-400">
                     <span className="font-semibold text-blue-600 dark:text-blue-400">Nhấn để chọn file</span> hoặc kéo thả vào đây
                   </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-500">CSV, JSON (Tối đa 10MB)</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-500">CSV, Excel (Tối đa 10MB)</p>
                 </>
               )}
             </div>
             <input 
               type="file" 
               className="hidden" 
-              accept=".csv,.json,application/json,text/csv" 
+              accept=".csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" 
               onChange={handleFileChange} 
             />
           </label>
