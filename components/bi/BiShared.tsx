@@ -25,19 +25,116 @@ export function getTimeCutoff(period: TimePeriod): Date {
   const now = new Date();
   switch (period) {
     case 'today':
-      return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      return new Date(now.getFullYear(), now.getMonth(), 1); // show full month context
     case 'wtd': {
       const d = new Date(now);
-      const day = d.getDay() || 7; // Monday = 1
-      d.setDate(d.getDate() - day + 1);
+      d.setMonth(d.getMonth() - 1);
+      d.setDate(1);
       d.setHours(0, 0, 0, 0);
-      return d;
+      return d; // from 1st of previous month
     }
     case 'mtd':
-      return new Date(now.getFullYear(), now.getMonth(), 1);
+      return new Date(now.getFullYear(), 0, 1);
     case 'ytd':
       return new Date(now.getFullYear(), 0, 1);
   }
+}
+
+// Build trend data based on period
+export interface TrendPoint { label: string; revenue: number; orders: number; target?: number; }
+
+export function buildTrendData(
+  orders: any[], period: TimePeriod, monthlyTarget: number
+): TrendPoint[] {
+  const now = new Date();
+
+  if (period === 'today') {
+    // X-axis: each day in current month up to today
+    const daysInMonth = now.getDate();
+    const month = now.getMonth();
+    const year = now.getFullYear();
+    const dailyTarget = monthlyTarget / new Date(year, month + 1, 0).getDate();
+    const dayMap: Record<number, { revenue: number; orders: number }> = {};
+
+    orders.forEach(o => {
+      const d = new Date(o.order_date);
+      if (d.getMonth() === month && d.getFullYear() === year) {
+        const day = d.getDate();
+        if (!dayMap[day]) dayMap[day] = { revenue: 0, orders: 0 };
+        dayMap[day].revenue += o.total_amount;
+        dayMap[day].orders += 1;
+      }
+    });
+
+    const result: TrendPoint[] = [];
+    for (let d = 1; d <= daysInMonth; d++) {
+      result.push({
+        label: `${d}`,
+        revenue: dayMap[d]?.revenue || 0,
+        orders: dayMap[d]?.orders || 0,
+        target: dailyTarget
+      });
+    }
+    return result;
+  }
+
+  if (period === 'wtd') {
+    // X-axis: W1 of previous month to current week
+    const getWeekOfMonth = (date: Date) => Math.ceil(date.getDate() / 7);
+    const prevMonth = new Date(now); prevMonth.setMonth(now.getMonth() - 1);
+    const weekMap: Record<string, { revenue: number; orders: number }> = {};
+
+    orders.forEach(o => {
+      const d = new Date(o.order_date);
+      const mDiff = (now.getFullYear() - d.getFullYear()) * 12 + now.getMonth() - d.getMonth();
+      if (mDiff <= 1) {
+        const mLabel = d.getMonth() === now.getMonth() ? 'T.này' : 'T.trước';
+        const wk = getWeekOfMonth(d);
+        const key = `${mLabel} W${wk}`;
+        if (!weekMap[key]) weekMap[key] = { revenue: 0, orders: 0 };
+        weekMap[key].revenue += o.total_amount;
+        weekMap[key].orders += 1;
+      }
+    });
+
+    // Build ordered week list
+    const weeklyTarget = monthlyTarget / 4;
+    const result: TrendPoint[] = [];
+    for (let w = 1; w <= 5; w++) {
+      const key = `T.trước W${w}`;
+      if (weekMap[key]) result.push({ label: key, ...weekMap[key], target: weeklyTarget });
+    }
+    for (let w = 1; w <= 5; w++) {
+      const key = `T.này W${w}`;
+      if (weekMap[key] || w <= getWeekOfMonth(now)) {
+        result.push({ label: key, revenue: weekMap[key]?.revenue || 0, orders: weekMap[key]?.orders || 0, target: weeklyTarget });
+      }
+    }
+    return result;
+  }
+
+  // mtd / ytd — X-axis: each month from T1 to current
+  const monthMap: Record<number, { revenue: number; orders: number }> = {};
+  orders.forEach(o => {
+    const d = new Date(o.order_date);
+    if (d.getFullYear() === now.getFullYear()) {
+      const m = d.getMonth();
+      if (!monthMap[m]) monthMap[m] = { revenue: 0, orders: 0 };
+      monthMap[m].revenue += o.total_amount;
+      monthMap[m].orders += 1;
+    }
+  });
+
+  const result: TrendPoint[] = [];
+  for (let m = 0; m <= now.getMonth(); m++) {
+    result.push({
+      label: `T${m + 1}`,
+      revenue: monthMap[m]?.revenue || 0,
+      orders: monthMap[m]?.orders || 0,
+      target: monthlyTarget
+    });
+  }
+  return result;
 }
 
 // KPI Card Component

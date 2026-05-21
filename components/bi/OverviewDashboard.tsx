@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, LineChart, Line, Legend
+  PieChart, Pie, Cell, LineChart, Line, Legend, ReferenceLine, ComposedChart
 } from 'recharts';
 import {
   DollarSign, ShoppingCart, TrendingUp, Users, Award,
@@ -11,21 +11,17 @@ import {
 } from 'lucide-react';
 import {
   formatVND, COLORS, ROLE_COLORS, KPICard, ChartCard, FilterBar, ActiveFilters,
-  TimePeriod, getTimeCutoff
+  TimePeriod, getTimeCutoff, buildTrendData
 } from './BiShared';
 
-interface Order {
-  id: string; order_date: string; total_amount: number;
-  sales_rep_id: string; customer: any; items: any[];
-}
-interface SalesRep {
-  id: string; employee_code: string; name: string; role: string;
-  parent_id: string | null; province: string; district: string;
-}
+interface Order { id: string; order_date: string; total_amount: number; sales_rep_id: string; customer: any; items: any[]; }
+interface SalesRep { id: string; employee_code: string; name: string; role: string; parent_id: string | null; province: string; district: string; }
+interface Target { employee_id: string; month: string; revenue_target: number; orders_target: number; }
 
 export default function OverviewDashboard() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [salesTeam, setSalesTeam] = useState<SalesRep[]>([]);
+  const [targets, setTargets] = useState<Target[]>([]);
   const [totalCustomers, setTotalCustomers] = useState(0);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({
@@ -44,7 +40,7 @@ export default function OverviewDashboard() {
         setOrders(res.data.orders);
         setSalesTeam(res.data.salesTeam);
         setTotalCustomers(res.data.totalCustomers);
-        // Expand all ASMs
+        setTargets(res.data.targets || []);
         const exp: Record<string, boolean> = {};
         res.data.salesTeam.filter((t: SalesRep) => t.role === 'ASM').forEach((t: SalesRep) => { exp[t.id] = true; });
         setExpandedASM(exp);
@@ -53,7 +49,6 @@ export default function OverviewDashboard() {
     }).catch(() => setLoading(false));
   }, []);
 
-  // Hierarchy
   const { srToSS, ssToASM } = useMemo(() => {
     const srToSS: Record<string, string> = {};
     const ssToASM: Record<string, string> = {};
@@ -73,14 +68,12 @@ export default function OverviewDashboard() {
     return salesTeam.filter(t => t.role === 'SR' && ssIds.includes(t.parent_id || '')).map(t => t.id);
   }, [salesTeam]);
 
-  // Districts & Provinces
   const provinces = useMemo(() => [...new Set(orders.map(o => o.customer?.province).filter(Boolean))].sort(), [orders]);
   const districts = useMemo(() => {
     if (!filters.province) return [];
     return [...new Set(orders.filter(o => o.customer?.province === filters.province).map(o => o.customer?.district).filter(Boolean))].sort();
   }, [orders, filters.province]);
 
-  // FILTERED ORDERS
   const filtered = useMemo(() => {
     const cutoff = getTimeCutoff(filters.period);
     return orders.filter(o => {
@@ -100,7 +93,17 @@ export default function OverviewDashboard() {
     });
   }, [orders, filters, getSRIdsUnder]);
 
-  // KPIs
+  // Monthly target sum (all employees)
+  const currentMonthTarget = useMemo(() => {
+    const now = new Date();
+    const monthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    // Sum all ASM targets (top-level represents total)
+    const asmIds = salesTeam.filter(t => t.role === 'ASM').map(t => t.id);
+    return targets
+      .filter(t => t.month?.startsWith(monthStr.substring(0, 7)) && asmIds.includes(t.employee_id))
+      .reduce((s, t) => s + Number(t.revenue_target), 0) || 150000000; // fallback
+  }, [targets, salesTeam]);
+
   const kpis = useMemo(() => {
     const rev = filtered.reduce((s, o) => s + o.total_amount, 0);
     const cnt = filtered.length;
@@ -108,21 +111,15 @@ export default function OverviewDashboard() {
     return { revenue: rev, orders: cnt, avg: cnt > 0 ? rev / cnt : 0, customers: custSet.size };
   }, [filtered]);
 
-  // Monthly Revenue
-  const monthlyRevenue = useMemo(() => {
-    const map: Record<string, number> = {};
-    filtered.forEach(o => {
-      const d = new Date(o.order_date);
-      const key = `T${d.getMonth() + 1}`;
-      map[key] = (map[key] || 0) + o.total_amount;
-    });
-    const months = [];
-    for (let i = 0; i < 12; i++) {
-      const key = `T${i + 1}`;
-      if (map[key]) months.push({ month: key, revenue: map[key] });
-    }
-    return months.length > 0 ? months : [{ month: `T${new Date().getMonth() + 1}`, revenue: 0 }];
-  }, [filtered]);
+  // Trend chart data with target + average lines
+  const trendData = useMemo(() => {
+    return buildTrendData(filtered, filters.period, currentMonthTarget);
+  }, [filtered, filters.period, currentMonthTarget]);
+
+  const avgRevenue = useMemo(() => {
+    const nonZero = trendData.filter(d => d.revenue > 0);
+    return nonZero.length > 0 ? nonZero.reduce((s, d) => s + d.revenue, 0) / nonZero.length : 0;
+  }, [trendData]);
 
   // Category Pie
   const categoryData = useMemo(() => {
@@ -142,30 +139,17 @@ export default function OverviewDashboard() {
     return Object.values(map).sort((a, b) => b.rev - a.rev).slice(0, 7);
   }, [filtered]);
 
-  // Channel Data
+  // Channel
   const channelData = useMemo(() => {
     const map: Record<string, { revenue: number; orders: number }> = {};
-    filtered.forEach(o => {
-      const ch = o.customer?.channel || 'GT';
-      if (!map[ch]) map[ch] = { revenue: 0, orders: 0 };
-      map[ch].revenue += o.total_amount;
-      map[ch].orders += 1;
-    });
-    return Object.entries(map).map(([ch, d]) => ({
-      name: ch === 'GT' ? 'Truyền thống (GT)' : 'Hiện đại (MT)',
-      channel: ch, revenue: d.revenue, orders: d.orders
-    }));
+    filtered.forEach(o => { const ch = o.customer?.channel || 'GT'; if (!map[ch]) map[ch] = { revenue: 0, orders: 0 }; map[ch].revenue += o.total_amount; map[ch].orders += 1; });
+    return Object.entries(map).map(([ch, d]) => ({ name: ch === 'GT' ? 'Truyền thống (GT)' : 'Hiện đại (MT)', channel: ch, revenue: d.revenue, orders: d.orders }));
   }, [filtered]);
 
   // Team rollup
   const teamRollup = useMemo(() => {
     const repStats: Record<string, { revenue: number; orders: number }> = {};
-    filtered.forEach(o => {
-      if (!o.sales_rep_id) return;
-      if (!repStats[o.sales_rep_id]) repStats[o.sales_rep_id] = { revenue: 0, orders: 0 };
-      repStats[o.sales_rep_id].revenue += o.total_amount;
-      repStats[o.sales_rep_id].orders += 1;
-    });
+    filtered.forEach(o => { if (!o.sales_rep_id) return; if (!repStats[o.sales_rep_id]) repStats[o.sales_rep_id] = { revenue: 0, orders: 0 }; repStats[o.sales_rep_id].revenue += o.total_amount; repStats[o.sales_rep_id].orders += 1; });
     const list = salesTeam.map(t => ({ ...t, revenue: 0, orders: 0 }));
     const tMap: Record<string, any> = {};
     list.forEach(t => { tMap[t.id] = t; });
@@ -175,20 +159,6 @@ export default function OverviewDashboard() {
     return list;
   }, [filtered, salesTeam]);
 
-  // Weekly trend
-  const weeklyTrend = useMemo(() => {
-    const map: Record<string, { revenue: number; orders: number }> = {};
-    filtered.forEach(o => {
-      const d = new Date(o.order_date);
-      const ws = new Date(d); ws.setDate(d.getDate() - (d.getDay() || 7) + 1);
-      const key = `${ws.getDate()}/${ws.getMonth() + 1}`;
-      if (!map[key]) map[key] = { revenue: 0, orders: 0 };
-      map[key].revenue += o.total_amount;
-      map[key].orders += 1;
-    });
-    return Object.entries(map).map(([week, d]) => ({ week, revenue: d.revenue, orders: d.orders })).slice(-8);
-  }, [filtered]);
-
   const clearFilter = (key: string) => setFilters(f => ({ ...f, [key]: null }));
 
   if (loading) return <div className="flex-1 flex items-center justify-center"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600" /></div>;
@@ -197,12 +167,13 @@ export default function OverviewDashboard() {
   const ssList = teamRollup.filter(t => t.role === 'SS');
   const srList = teamRollup.filter(t => t.role === 'SR');
 
+  const periodLabel = filters.period === 'today' ? 'theo ngày' : filters.period === 'wtd' ? 'theo tuần' : 'theo tháng';
+
   return (
     <>
       <FilterBar filters={filters} setFilters={setFilters} districts={districts} provinces={provinces} showChannel />
       <ActiveFilters filters={filters} salesTeam={salesTeam} onClear={clearFilter} />
 
-      {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <KPICard icon={<DollarSign className="w-5 h-5" />} label="Tổng Doanh thu" value={formatVND(kpis.revenue)} suffix="đ" color="from-indigo-500 to-blue-600" />
         <KPICard icon={<ShoppingCart className="w-5 h-5" />} label="Tổng Đơn hàng" value={kpis.orders.toString()} suffix="đơn" color="from-emerald-500 to-green-600" />
@@ -210,25 +181,31 @@ export default function OverviewDashboard() {
         <KPICard icon={<Users className="w-5 h-5" />} label="Điểm bán hoạt động" value={kpis.customers.toString()} suffix="ĐB" color="from-pink-500 to-rose-600" />
       </div>
 
-      {/* Charts Row 1 */}
+      {/* Main Trend Chart with Target + Average */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
-        <ChartCard title="📊 Doanh thu theo tháng" className="lg:col-span-2">
-          <div className="h-[280px]">
+        <ChartCard title={`📊 Doanh thu ${periodLabel} vs Target`} className="lg:col-span-2">
+          <div className="h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={monthlyRevenue} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
+              <ComposedChart data={trendData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="month" tick={{ fontSize: 12, fill: '#6b7280' }} />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#6b7280' }} />
                 <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} tickFormatter={v => formatVND(v)} />
-                <Tooltip formatter={(v: any) => [`${Number(v).toLocaleString('vi-VN')} đ`, 'Doanh thu']} contentStyle={{ borderRadius: '10px', border: '1px solid #e5e7eb', fontSize: 13 }} />
-                <Bar dataKey="revenue" fill="url(#ovBarGrad)" radius={[6, 6, 0, 0]} />
+                <Tooltip formatter={(v: any, name: any) => [
+                  `${Number(v).toLocaleString('vi-VN')} đ`,
+                  name === 'revenue' ? 'Thực tế' : name === 'target' ? 'Target' : 'Trung bình'
+                ]} contentStyle={{ borderRadius: '10px', fontSize: 12 }} />
+                <Bar dataKey="revenue" fill="url(#ovBarGrad)" radius={[4, 4, 0, 0]} name="Thực tế" />
+                <Line type="monotone" dataKey="target" stroke="#ef4444" strokeWidth={2} strokeDasharray="6 3" dot={false} name="Target" />
+                {avgRevenue > 0 && <ReferenceLine y={avgRevenue} stroke="#f59e0b" strokeWidth={2} strokeDasharray="4 4" label={{ value: `TB: ${formatVND(avgRevenue)}`, fill: '#f59e0b', fontSize: 11, position: 'insideTopRight' }} />}
+                <Legend />
                 <defs><linearGradient id="ovBarGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#6366f1" /><stop offset="100%" stopColor="#818cf8" /></linearGradient></defs>
-              </BarChart>
+              </ComposedChart>
             </ResponsiveContainer>
           </div>
         </ChartCard>
 
         <ChartCard title="🥧 Cơ cấu nhóm hàng">
-          <div className="h-[280px]">
+          <div className="h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie data={categoryData} cx="50%" cy="45%" innerRadius={50} outerRadius={85} paddingAngle={3} dataKey="value"
@@ -244,23 +221,8 @@ export default function OverviewDashboard() {
         </ChartCard>
       </div>
 
-      {/* Charts Row 2 — Trend + Channel */}
+      {/* Channel + Top Products */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-        <ChartCard title="📈 Xu hướng doanh thu theo tuần">
-          <div className="h-[250px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={weeklyTrend} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="week" tick={{ fontSize: 11, fill: '#6b7280' }} />
-                <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} tickFormatter={v => formatVND(v)} />
-                <Tooltip formatter={(v: any) => [`${Number(v).toLocaleString('vi-VN')} đ`]} />
-                <Line type="monotone" dataKey="revenue" stroke="#6366f1" strokeWidth={2.5} dot={{ r: 4, fill: '#6366f1' }} name="Doanh thu" />
-                <Legend />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </ChartCard>
-
         <ChartCard title="🏪 So sánh kênh phân phối">
           <div className="h-[250px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -277,10 +239,7 @@ export default function OverviewDashboard() {
             </ResponsiveContainer>
           </div>
         </ChartCard>
-      </div>
 
-      {/* Bottom Row — Top products + Team */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <ChartCard title="">
           <h2 className="text-base font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2 -mt-4">
             <Award className="w-5 h-5 text-amber-500" /> Top Sản phẩm bán chạy
@@ -293,58 +252,59 @@ export default function OverviewDashboard() {
               <th className="text-right py-2 px-2 text-gray-500 font-medium">Doanh thu</th>
             </tr></thead>
             <tbody>{topProducts.map((p, i) => (
-              <tr key={p.sku} className="border-b border-gray-100 dark:border-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-800/50 transition-colors">
-                <td className="py-2.5 px-2"><span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${i === 0 ? 'bg-amber-100 text-amber-700' : i === 1 ? 'bg-gray-100 text-gray-600' : i === 2 ? 'bg-orange-100 text-orange-700' : 'bg-gray-50 text-gray-400'}`}>{i + 1}</span></td>
-                <td className="py-2.5 px-2"><p className="font-medium text-gray-900 dark:text-white">{p.name}</p><p className="text-xs text-gray-400">{p.sku}</p></td>
-                <td className="py-2.5 px-2 text-right font-mono text-gray-700 dark:text-gray-300">{p.qty}</td>
-                <td className="py-2.5 px-2 text-right font-mono font-medium text-indigo-600 dark:text-indigo-400">{formatVND(p.rev)}đ</td>
+              <tr key={p.sku} className="border-b border-gray-100 dark:border-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-800/50">
+                <td className="py-2 px-2"><span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${i === 0 ? 'bg-amber-100 text-amber-700' : i === 1 ? 'bg-gray-100 text-gray-600' : i === 2 ? 'bg-orange-100 text-orange-700' : 'bg-gray-50 text-gray-400'}`}>{i + 1}</span></td>
+                <td className="py-2 px-2"><p className="font-medium text-gray-900 dark:text-white text-xs">{p.name}</p><p className="text-[10px] text-gray-400">{p.sku}</p></td>
+                <td className="py-2 px-2 text-right font-mono text-xs text-gray-700 dark:text-gray-300">{p.qty}</td>
+                <td className="py-2 px-2 text-right font-mono text-xs font-medium text-indigo-600 dark:text-indigo-400">{formatVND(p.rev)}đ</td>
               </tr>
             ))}</tbody>
           </table>
         </ChartCard>
-
-        <ChartCard title="">
-          <h2 className="text-base font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2 -mt-4">
-            <Briefcase className="w-5 h-5 text-indigo-500" /> Doanh thu đội ngũ
-          </h2>
-          <div className="space-y-1 max-h-[380px] overflow-y-auto">
-            {asmList.map(asm => (
-              <div key={asm.id}>
-                <button onClick={() => { setExpandedASM(p => ({ ...p, [asm.id]: !p[asm.id] })); setFilters(f => ({ ...f, selectedEmployee: f.selectedEmployee === asm.id ? null : asm.id })); }}
-                  className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-lg transition-colors text-left ${filters.selectedEmployee === asm.id ? 'bg-indigo-100 dark:bg-indigo-900/30' : 'hover:bg-indigo-50 dark:hover:bg-indigo-900/20'}`}>
-                  {expandedASM[asm.id] ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
-                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold text-white" style={{ backgroundColor: ROLE_COLORS.ASM }}>ASM</span>
-                  <span className="font-semibold text-gray-900 dark:text-white flex-1 text-sm">{asm.name}</span>
-                  <span className="text-sm font-mono font-bold text-indigo-600 dark:text-indigo-400">{formatVND(asm.revenue)}đ</span>
-                  <span className="text-xs text-gray-400 w-14 text-right">{asm.orders} đơn</span>
-                </button>
-                {expandedASM[asm.id] && ssList.filter(ss => ss.parent_id === asm.id).map(ss => (
-                  <div key={ss.id} className="ml-6">
-                    <button onClick={() => { setExpandedSS(p => ({ ...p, [ss.id]: !p[ss.id] })); setFilters(f => ({ ...f, selectedEmployee: f.selectedEmployee === ss.id ? null : ss.id })); }}
-                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-left ${filters.selectedEmployee === ss.id ? 'bg-amber-100 dark:bg-amber-900/30' : 'hover:bg-amber-50 dark:hover:bg-amber-900/20'}`}>
-                      {expandedSS[ss.id] ? <ChevronDown className="w-3.5 h-3.5 text-gray-400" /> : <ChevronRight className="w-3.5 h-3.5 text-gray-400" />}
-                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold text-white" style={{ backgroundColor: ROLE_COLORS.SS }}>SS</span>
-                      <span className="font-medium text-gray-800 dark:text-gray-200 flex-1 text-sm">{ss.name}</span>
-                      <span className="text-sm font-mono text-amber-600 dark:text-amber-400">{formatVND(ss.revenue)}đ</span>
-                      <span className="text-xs text-gray-400 w-14 text-right">{ss.orders} đơn</span>
-                    </button>
-                    {expandedSS[ss.id] && srList.filter(sr => sr.parent_id === ss.id).map(sr => (
-                      <div key={sr.id} onClick={() => setFilters(f => ({ ...f, selectedEmployee: f.selectedEmployee === sr.id ? null : sr.id }))}
-                        className={`ml-6 flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors ${filters.selectedEmployee === sr.id ? 'bg-emerald-100 dark:bg-emerald-900/30' : 'hover:bg-emerald-50 dark:hover:bg-emerald-900/20'}`}>
-                        <div className="w-3.5 h-3.5" />
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold text-white" style={{ backgroundColor: ROLE_COLORS.SR }}>SR</span>
-                        <span className="text-sm text-gray-700 dark:text-gray-300 flex-1">{sr.name}</span>
-                        <span className="text-sm font-mono text-emerald-600 dark:text-emerald-400">{formatVND(sr.revenue)}đ</span>
-                        <span className="text-xs text-gray-400 w-14 text-right">{sr.orders} đơn</span>
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
-        </ChartCard>
       </div>
+
+      {/* Team Tree */}
+      <ChartCard title="">
+        <h2 className="text-base font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2 -mt-4">
+          <Briefcase className="w-5 h-5 text-indigo-500" /> Doanh thu đội ngũ
+        </h2>
+        <div className="space-y-1 max-h-[400px] overflow-y-auto">
+          {asmList.map(asm => (
+            <div key={asm.id}>
+              <button onClick={() => { setExpandedASM(p => ({ ...p, [asm.id]: !p[asm.id] })); setFilters(f => ({ ...f, selectedEmployee: f.selectedEmployee === asm.id ? null : asm.id })); }}
+                className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-lg transition-colors text-left ${filters.selectedEmployee === asm.id ? 'bg-indigo-100 dark:bg-indigo-900/30' : 'hover:bg-indigo-50 dark:hover:bg-indigo-900/20'}`}>
+                {expandedASM[asm.id] ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold text-white" style={{ backgroundColor: ROLE_COLORS.ASM }}>ASM</span>
+                <span className="font-semibold text-gray-900 dark:text-white flex-1 text-sm">{asm.name}</span>
+                <span className="text-sm font-mono font-bold text-indigo-600 dark:text-indigo-400">{formatVND(asm.revenue)}đ</span>
+                <span className="text-xs text-gray-400 w-14 text-right">{asm.orders} đơn</span>
+              </button>
+              {expandedASM[asm.id] && ssList.filter(ss => ss.parent_id === asm.id).map(ss => (
+                <div key={ss.id} className="ml-6">
+                  <button onClick={() => { setExpandedSS(p => ({ ...p, [ss.id]: !p[ss.id] })); setFilters(f => ({ ...f, selectedEmployee: f.selectedEmployee === ss.id ? null : ss.id })); }}
+                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-left ${filters.selectedEmployee === ss.id ? 'bg-amber-100 dark:bg-amber-900/30' : 'hover:bg-amber-50 dark:hover:bg-amber-900/20'}`}>
+                    {expandedSS[ss.id] ? <ChevronDown className="w-3.5 h-3.5 text-gray-400" /> : <ChevronRight className="w-3.5 h-3.5 text-gray-400" />}
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold text-white" style={{ backgroundColor: ROLE_COLORS.SS }}>SS</span>
+                    <span className="font-medium text-gray-800 dark:text-gray-200 flex-1 text-sm">{ss.name}</span>
+                    <span className="text-sm font-mono text-amber-600 dark:text-amber-400">{formatVND(ss.revenue)}đ</span>
+                    <span className="text-xs text-gray-400 w-14 text-right">{ss.orders} đơn</span>
+                  </button>
+                  {expandedSS[ss.id] && srList.filter(sr => sr.parent_id === ss.id).map(sr => (
+                    <div key={sr.id} onClick={() => setFilters(f => ({ ...f, selectedEmployee: f.selectedEmployee === sr.id ? null : sr.id }))}
+                      className={`ml-6 flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors ${filters.selectedEmployee === sr.id ? 'bg-emerald-100 dark:bg-emerald-900/30' : 'hover:bg-emerald-50 dark:hover:bg-emerald-900/20'}`}>
+                      <div className="w-3.5 h-3.5" />
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold text-white" style={{ backgroundColor: ROLE_COLORS.SR }}>SR</span>
+                      <span className="text-sm text-gray-700 dark:text-gray-300 flex-1">{sr.name}</span>
+                      <span className="text-sm font-mono text-emerald-600 dark:text-emerald-400">{formatVND(sr.revenue)}đ</span>
+                      <span className="text-xs text-gray-400 w-14 text-right">{sr.orders} đơn</span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </ChartCard>
     </>
   );
 }

@@ -3,36 +3,26 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, LineChart, Line, Legend
+  PieChart, Pie, Cell, Legend, ComposedChart, Line, ReferenceLine
 } from 'recharts';
 import {
   DollarSign, ShoppingCart, Package, Target, Percent, Store
 } from 'lucide-react';
 import {
   formatVND, COLORS, ROLE_COLORS, KPICard, ChartCard, FilterBar, ActiveFilters,
-  TimePeriod, getTimeCutoff
+  TimePeriod, getTimeCutoff, buildTrendData
 } from './BiShared';
 
-interface OrderItem {
-  product_id: string; product_name: string; product_sku: string;
-  category_name: string; quantity: number; subtotal: number;
-}
-interface Customer {
-  id: string; name: string; district: string; province: string;
-  channel: string; customer_type: string;
-}
-interface SalesRep {
-  id: string; name: string; role: string; employee_code: string;
-  parent_id: string | null; province: string; district: string; status: string;
-}
-interface Order {
-  id: string; order_date: string; total_amount: number;
-  sales_rep_id: string; customer: Customer; items: OrderItem[];
-}
+interface OrderItem { product_id: string; product_name: string; product_sku: string; category_name: string; quantity: number; subtotal: number; }
+interface Customer { id: string; name: string; district: string; province: string; channel: string; customer_type: string; }
+interface SalesRep { id: string; name: string; role: string; employee_code: string; parent_id: string | null; province: string; district: string; status: string; }
+interface Order { id: string; order_date: string; total_amount: number; sales_rep_id: string; customer: Customer; items: OrderItem[]; }
+interface TargetRow { employee_id: string; month: string; revenue_target: number; orders_target: number; sku_per_order_target: number; dropsize_target: number; vpo_target: number; pc_target: number; }
 
 export default function SalesActivityDashboard() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [salesTeam, setSalesTeam] = useState<SalesRep[]>([]);
+  const [targets, setTargets] = useState<TargetRow[]>([]);
   const [totalCustomers, setTotalCustomers] = useState(0);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({
@@ -50,6 +40,7 @@ export default function SalesActivityDashboard() {
         setOrders(res.data.orders);
         setSalesTeam(res.data.salesTeam);
         setTotalCustomers(res.data.totalCustomers);
+        setTargets(res.data.targets || []);
       }
       setLoading(false);
     }).catch(() => setLoading(false));
@@ -80,7 +71,6 @@ export default function SalesActivityDashboard() {
     return [...new Set(orders.filter(o => o.customer?.province === filters.province).map(o => o.customer?.district).filter(Boolean))].sort();
   }, [orders, filters.province]);
 
-  // FILTERED
   const filtered = useMemo(() => {
     const cutoff = getTimeCutoff(filters.period);
     return orders.filter(o => {
@@ -100,7 +90,13 @@ export default function SalesActivityDashboard() {
     });
   }, [orders, filters, getSRIdsUnder]);
 
-  // KPIs
+  // Get target for an employee in current month
+  const getTarget = useCallback((empId: string): TargetRow | null => {
+    const now = new Date();
+    const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    return targets.find(t => t.employee_id === empId && t.month?.startsWith(monthPrefix)) || null;
+  }, [targets]);
+
   const kpis = useMemo(() => {
     const rev = filtered.reduce((s, o) => s + o.total_amount, 0);
     const cnt = filtered.length;
@@ -112,24 +108,39 @@ export default function SalesActivityDashboard() {
       dropsize: cnt > 0 ? rev / cnt : 0,
       vpo: uniqueCust > 0 ? rev / uniqueCust : 0,
       pc: totalCustomers > 0 ? (uniqueCust / totalCustomers) * 100 : 0,
-      uniqueCust
     };
   }, [filtered, totalCustomers]);
 
+  // Trend with target
+  const currentMonthTarget = useMemo(() => {
+    const roleEmps = salesTeam.filter(t => t.role === filters.roleLevel);
+    return roleEmps.reduce((s, e) => { const t = getTarget(e.id); return s + (t ? Number(t.revenue_target) : 0); }, 0) || 35000000;
+  }, [salesTeam, filters.roleLevel, getTarget]);
+
+  const trendData = useMemo(() => buildTrendData(filtered, filters.period, currentMonthTarget), [filtered, filters.period, currentMonthTarget]);
+
+  const avgRevenue = useMemo(() => {
+    const nonZero = trendData.filter(d => d.revenue > 0);
+    return nonZero.length > 0 ? nonZero.reduce((s, d) => s + d.revenue, 0) / nonZero.length : 0;
+  }, [trendData]);
+
   // Employee chart
   const empChart = useMemo(() => {
-    const map: Record<string, { name: string; role: string; revenue: number; orders: number; id: string }> = {};
+    const map: Record<string, { name: string; role: string; revenue: number; orders: number; id: string; target: number }> = {};
     filtered.forEach(o => {
       let tid = o.sales_rep_id;
       if (filters.roleLevel === 'SS') tid = srToSS[o.sales_rep_id] || o.sales_rep_id;
       if (filters.roleLevel === 'ASM') { const ss = srToSS[o.sales_rep_id]; tid = ss ? (ssToASM[ss] || ss) : o.sales_rep_id; }
       const emp = salesTeam.find(t => t.id === tid);
       if (!emp) return;
-      if (!map[tid]) map[tid] = { name: emp.name, role: emp.role, revenue: 0, orders: 0, id: emp.id };
+      if (!map[tid]) {
+        const tgt = getTarget(emp.id);
+        map[tid] = { name: emp.name, role: emp.role, revenue: 0, orders: 0, id: emp.id, target: tgt ? Number(tgt.revenue_target) : 0 };
+      }
       map[tid].revenue += o.total_amount; map[tid].orders += 1;
     });
     return Object.values(map).sort((a, b) => b.revenue - a.revenue);
-  }, [filtered, filters.roleLevel, salesTeam, srToSS, ssToASM]);
+  }, [filtered, filters.roleLevel, salesTeam, srToSS, ssToASM, getTarget]);
 
   // Category
   const catData = useMemo(() => {
@@ -138,30 +149,7 @@ export default function SalesActivityDashboard() {
     return Object.entries(map).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
   }, [filtered]);
 
-  // Weekly trend
-  const trend = useMemo(() => {
-    const map: Record<string, { revenue: number; orders: number; custs: Set<string> }> = {};
-    filtered.forEach(o => {
-      const d = new Date(o.order_date);
-      const ws = new Date(d); ws.setDate(d.getDate() - (d.getDay() || 7) + 1);
-      const key = `${ws.getDate()}/${ws.getMonth() + 1}`;
-      if (!map[key]) map[key] = { revenue: 0, orders: 0, custs: new Set() };
-      map[key].revenue += o.total_amount; map[key].orders += 1;
-      if (o.customer?.id) map[key].custs.add(o.customer.id);
-    });
-    return Object.entries(map).map(([week, d]) => ({
-      week, dropsize: d.orders > 0 ? Math.round(d.revenue / d.orders) : 0, orders: d.orders
-    })).slice(-8);
-  }, [filtered]);
-
-  // Channel
-  const chData = useMemo(() => {
-    const map: Record<string, { revenue: number; orders: number }> = {};
-    filtered.forEach(o => { const ch = o.customer?.channel || 'GT'; if (!map[ch]) map[ch] = { revenue: 0, orders: 0 }; map[ch].revenue += o.total_amount; map[ch].orders += 1; });
-    return Object.entries(map).map(([ch, d]) => ({ name: ch === 'GT' ? 'GT' : 'MT', channel: ch, revenue: d.revenue, orders: d.orders, dropsize: d.orders > 0 ? Math.round(d.revenue / d.orders) : 0 }));
-  }, [filtered]);
-
-  // Employee detail table
+  // Employee detail table with target comparison and parent info
   const empTable = useMemo(() => {
     const rows: any[] = [];
     salesTeam.filter(t => t.role === filters.roleLevel).forEach(emp => {
@@ -171,20 +159,45 @@ export default function SalesActivityDashboard() {
       const cnt = empOrders.length;
       const uSkus = empOrders.reduce((s, o) => s + new Set(o.items.map(i => i.product_id)).size, 0);
       const uCust = new Set(empOrders.map(o => o.customer?.id)).size;
+
+      const tgt = getTarget(emp.id);
+      const parent = emp.parent_id ? salesTeam.find(t => t.id === emp.parent_id) : null;
+
       rows.push({
         id: emp.id, code: emp.employee_code, name: emp.name, role: emp.role,
         revenue: rev, orders: cnt,
-        skuPerOrder: cnt > 0 ? (uSkus / cnt).toFixed(1) : '0',
+        skuPerOrder: cnt > 0 ? +(uSkus / cnt).toFixed(1) : 0,
         dropsize: cnt > 0 ? Math.round(rev / cnt) : 0,
         vpo: uCust > 0 ? Math.round(rev / uCust) : 0,
         customers: uCust,
-        parentName: emp.parent_id ? salesTeam.find(t => t.id === emp.parent_id)?.name || '' : ''
+        pc: totalCustomers > 0 ? +((uCust / totalCustomers) * 100).toFixed(1) : 0,
+        // Target
+        tRevenue: tgt ? Number(tgt.revenue_target) : 0,
+        tOrders: tgt ? Number(tgt.orders_target) : 0,
+        tSku: tgt ? Number(tgt.sku_per_order_target) : 0,
+        tDropsize: tgt ? Number(tgt.dropsize_target) : 0,
+        tVpo: tgt ? Number(tgt.vpo_target) : 0,
+        tPc: tgt ? Number(tgt.pc_target) : 0,
+        // Parent
+        parentName: parent?.name || '',
+        parentRole: parent?.role || '',
       });
     });
     return rows.sort((a, b) => b.revenue - a.revenue);
-  }, [filtered, salesTeam, filters.roleLevel, getSRIdsUnder]);
+  }, [filtered, salesTeam, filters.roleLevel, getSRIdsUnder, getTarget, totalCustomers]);
 
   const clearFilter = (key: string) => setFilters(f => ({ ...f, [key]: null }));
+  const periodLabel = filters.period === 'today' ? 'theo ngày' : filters.period === 'wtd' ? 'theo tuần' : 'theo tháng';
+
+  // Helper: achievement color
+  const achColor = (actual: number, target: number) => {
+    if (!target) return 'text-gray-500';
+    const pct = actual / target;
+    if (pct >= 1) return 'text-emerald-600 dark:text-emerald-400';
+    if (pct >= 0.7) return 'text-amber-600 dark:text-amber-400';
+    return 'text-red-600 dark:text-red-400';
+  };
+  const achPct = (actual: number, target: number) => target > 0 ? `${((actual / target) * 100).toFixed(0)}%` : '-';
 
   if (loading) return <div className="flex-1 flex items-center justify-center"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600" /></div>;
 
@@ -193,7 +206,6 @@ export default function SalesActivityDashboard() {
       <FilterBar filters={filters} setFilters={setFilters} districts={districts} provinces={provinces} showRoleLevel showChannel />
       <ActiveFilters filters={filters} salesTeam={salesTeam} onClear={clearFilter} />
 
-      {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-6">
         <KPICard icon={<DollarSign className="w-5 h-5" />} label="Doanh thu" value={formatVND(kpis.revenue)} suffix="đ" color="from-indigo-500 to-blue-600" />
         <KPICard icon={<ShoppingCart className="w-5 h-5" />} label="Số đơn" value={kpis.orders.toString()} suffix="đơn" color="from-emerald-500 to-green-600" />
@@ -203,26 +215,28 @@ export default function SalesActivityDashboard() {
         <KPICard icon={<Percent className="w-5 h-5" />} label="PC" value={kpis.pc.toFixed(1)} suffix="%" color="from-pink-500 to-rose-600" />
       </div>
 
-      {/* Charts Row 1 */}
+      {/* Trend + Category */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
-        <ChartCard title={`💰 Doanh thu theo ${filters.roleLevel}`} className="lg:col-span-2">
-          <div className="h-[280px]">
+        <ChartCard title={`📊 Doanh thu ${periodLabel} vs Target`} className="lg:col-span-2">
+          <div className="h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={empChart} layout="vertical" margin={{ top: 5, right: 20, left: 5, bottom: 5 }}>
+              <ComposedChart data={trendData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis type="number" tickFormatter={v => formatVND(v)} tick={{ fontSize: 11, fill: '#6b7280' }} />
-                <YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 11, fill: '#6b7280' }} />
-                <Tooltip formatter={(v: any) => [`${Number(v).toLocaleString('vi-VN')} đ`, 'Doanh thu']} />
-                <Bar dataKey="revenue" fill="url(#saEmpGrad)" radius={[0, 6, 6, 0]} cursor="pointer"
-                  onClick={(data: any) => setFilters(f => ({ ...f, selectedEmployee: f.selectedEmployee === data.id ? null : data.id }))} />
-                <defs><linearGradient id="saEmpGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#6366f1" /><stop offset="100%" stopColor="#818cf8" /></linearGradient></defs>
-              </BarChart>
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#6b7280' }} />
+                <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} tickFormatter={v => formatVND(v)} />
+                <Tooltip formatter={(v: any, name: any) => [`${Number(v).toLocaleString('vi-VN')} đ`, name === 'revenue' ? 'Thực tế' : 'Target']} contentStyle={{ borderRadius: '10px', fontSize: 12 }} />
+                <Bar dataKey="revenue" fill="url(#saBarGrad)" radius={[4, 4, 0, 0]} name="Thực tế" />
+                <Line type="monotone" dataKey="target" stroke="#ef4444" strokeWidth={2} strokeDasharray="6 3" dot={false} name="Target" />
+                {avgRevenue > 0 && <ReferenceLine y={avgRevenue} stroke="#f59e0b" strokeWidth={2} strokeDasharray="4 4" label={{ value: `TB: ${formatVND(avgRevenue)}`, fill: '#f59e0b', fontSize: 11, position: 'insideTopRight' }} />}
+                <Legend />
+                <defs><linearGradient id="saBarGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#6366f1" /><stop offset="100%" stopColor="#818cf8" /></linearGradient></defs>
+              </ComposedChart>
             </ResponsiveContainer>
           </div>
         </ChartCard>
 
         <ChartCard title="📦 Cơ cấu nhóm hàng">
-          <div className="h-[280px]">
+          <div className="h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie data={catData} cx="50%" cy="45%" innerRadius={50} outerRadius={85} paddingAngle={3} dataKey="value"
@@ -238,77 +252,91 @@ export default function SalesActivityDashboard() {
         </ChartCard>
       </div>
 
-      {/* Charts Row 2 */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-        <ChartCard title="📈 Xu hướng Dropsize theo tuần">
-          <div className="h-[250px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={trend} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="week" tick={{ fontSize: 11, fill: '#6b7280' }} />
-                <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} tickFormatter={v => formatVND(v)} />
-                <Tooltip formatter={(v: any) => [`${Number(v).toLocaleString('vi-VN')} đ`]} />
-                <Line type="monotone" dataKey="dropsize" stroke="#6366f1" strokeWidth={2.5} dot={{ r: 4, fill: '#6366f1' }} name="Dropsize" />
-                <Legend />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </ChartCard>
+      {/* Employee Revenue vs Target bar chart */}
+      <ChartCard title={`💰 Doanh thu ${filters.roleLevel} — Thực tế vs Target`} className="mb-4">
+        <div className="h-[280px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={empChart} layout="vertical" margin={{ top: 5, right: 20, left: 5, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              <XAxis type="number" tickFormatter={v => formatVND(v)} tick={{ fontSize: 11, fill: '#6b7280' }} />
+              <YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 11, fill: '#6b7280' }} />
+              <Tooltip formatter={(v: any, name: any) => [`${Number(v).toLocaleString('vi-VN')} đ`, name === 'revenue' ? 'Thực tế' : 'Target']} />
+              <Bar dataKey="revenue" fill="#6366f1" radius={[0, 4, 4, 0]} name="Thực tế" cursor="pointer"
+                onClick={(data: any) => setFilters(f => ({ ...f, selectedEmployee: f.selectedEmployee === data.id ? null : data.id }))} />
+              <Bar dataKey="target" fill="#fca5a5" radius={[0, 4, 4, 0]} name="Target" opacity={0.5} />
+              <Legend />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </ChartCard>
 
-        <ChartCard title="🏪 So sánh Kênh">
-          <div className="h-[250px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#6b7280' }} />
-                <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} tickFormatter={v => formatVND(v)} />
-                <Tooltip formatter={(v: any, name: any) => [`${Number(v).toLocaleString('vi-VN')}${name === 'revenue' ? ' đ' : ''}`, name === 'revenue' ? 'Doanh thu' : 'Số đơn']} />
-                <Bar dataKey="revenue" fill="#6366f1" radius={[6, 6, 0, 0]} name="Doanh thu" cursor="pointer"
-                  onClick={(data: any) => setFilters(f => ({ ...f, selectedChannel: f.selectedChannel === data.channel ? null : data.channel }))} />
-                <Bar dataKey="orders" fill="#f59e0b" radius={[6, 6, 0, 0]} name="Số đơn" />
-                <Legend />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </ChartCard>
-      </div>
-
-      {/* Employee Detail Table */}
-      <ChartCard title={`📋 Chi tiết hiệu suất — Cấp ${filters.roleLevel}`}>
+      {/* Employee Detail Table with Target comparison */}
+      <ChartCard title={`📋 Hiệu suất ${filters.roleLevel} vs Target tháng`}>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead><tr className="border-b border-gray-200 dark:border-zinc-700">
-              <th className="text-left py-2 px-2 text-gray-500 font-medium">#</th>
-              <th className="text-left py-2 px-2 text-gray-500 font-medium">Mã NV</th>
-              <th className="text-left py-2 px-2 text-gray-500 font-medium">Nhân viên</th>
-              {filters.roleLevel !== 'ASM' && <th className="text-left py-2 px-2 text-gray-500 font-medium">Cấp trên</th>}
-              <th className="text-right py-2 px-2 text-gray-500 font-medium">Doanh thu</th>
-              <th className="text-right py-2 px-2 text-gray-500 font-medium">Đơn</th>
-              <th className="text-right py-2 px-2 text-gray-500 font-medium">SKU/Đơn</th>
-              <th className="text-right py-2 px-2 text-gray-500 font-medium">Dropsize</th>
-              <th className="text-right py-2 px-2 text-gray-500 font-medium">VPO</th>
-              <th className="text-right py-2 px-2 text-gray-500 font-medium">Điểm bán</th>
-            </tr></thead>
+          <table className="w-full text-[11px]">
+            <thead>
+              <tr className="border-b-2 border-gray-200 dark:border-zinc-700">
+                <th className="text-left py-2 px-1.5 text-gray-500 font-semibold">#</th>
+                <th className="text-left py-2 px-1.5 text-gray-500 font-semibold">Mã</th>
+                <th className="text-left py-2 px-1.5 text-gray-500 font-semibold">Nhân viên</th>
+                {filters.roleLevel !== 'ASM' && <th className="text-left py-2 px-1.5 text-gray-500 font-semibold">{filters.roleLevel === 'SR' ? 'SS' : 'ASM'}</th>}
+                <th className="text-right py-2 px-1.5 text-gray-500 font-semibold">DT Thực</th>
+                <th className="text-right py-2 px-1.5 text-gray-500 font-semibold">DT Target</th>
+                <th className="text-right py-2 px-1.5 text-gray-500 font-semibold">%</th>
+                <th className="text-right py-2 px-1.5 text-gray-500 font-semibold">Đơn</th>
+                <th className="text-right py-2 px-1.5 text-gray-500 font-semibold">SKU/Đ</th>
+                <th className="text-right py-2 px-1.5 text-gray-500 font-semibold">Dropsize</th>
+                <th className="text-right py-2 px-1.5 text-gray-500 font-semibold">VPO</th>
+                <th className="text-right py-2 px-1.5 text-gray-500 font-semibold">PC%</th>
+                <th className="text-right py-2 px-1.5 text-gray-500 font-semibold">ĐB</th>
+              </tr>
+            </thead>
             <tbody>
               {empTable.map((emp, i) => (
                 <tr key={emp.id}
                   className={`border-b border-gray-100 dark:border-zinc-800 transition-colors cursor-pointer ${filters.selectedEmployee === emp.id ? 'bg-indigo-50 dark:bg-indigo-900/30' : 'hover:bg-gray-50 dark:hover:bg-zinc-800/50'}`}
                   onClick={() => setFilters(f => ({ ...f, selectedEmployee: f.selectedEmployee === emp.id ? null : emp.id }))}>
-                  <td className="py-2.5 px-2"><span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${i === 0 ? 'bg-amber-100 text-amber-700' : i === 1 ? 'bg-gray-100 text-gray-600' : i === 2 ? 'bg-orange-100 text-orange-700' : 'bg-gray-50 text-gray-400'}`}>{i + 1}</span></td>
-                  <td className="py-2.5 px-2"><span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold text-white" style={{ backgroundColor: ROLE_COLORS[emp.role] }}>{emp.code}</span></td>
-                  <td className="py-2.5 px-2 font-medium text-gray-900 dark:text-white">{emp.name}</td>
-                  {filters.roleLevel !== 'ASM' && <td className="py-2.5 px-2 text-gray-500 text-xs">{emp.parentName}</td>}
-                  <td className="py-2.5 px-2 text-right font-mono font-medium text-indigo-600 dark:text-indigo-400">{formatVND(emp.revenue)}đ</td>
-                  <td className="py-2.5 px-2 text-right font-mono text-gray-700 dark:text-gray-300">{emp.orders}</td>
-                  <td className="py-2.5 px-2 text-right font-mono text-violet-600 dark:text-violet-400">{emp.skuPerOrder}</td>
-                  <td className="py-2.5 px-2 text-right font-mono text-amber-600 dark:text-amber-400">{formatVND(emp.dropsize)}đ</td>
-                  <td className="py-2.5 px-2 text-right font-mono text-cyan-600 dark:text-cyan-400">{formatVND(emp.vpo)}đ</td>
-                  <td className="py-2.5 px-2 text-right font-mono text-gray-700 dark:text-gray-300">{emp.customers}</td>
+                  <td className="py-2 px-1.5">
+                    <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold ${i === 0 ? 'bg-amber-100 text-amber-700' : i === 1 ? 'bg-gray-100 text-gray-600' : i === 2 ? 'bg-orange-100 text-orange-700' : 'bg-gray-50 text-gray-400'}`}>{i + 1}</span>
+                  </td>
+                  <td className="py-2 px-1.5">
+                    <span className="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-bold text-white" style={{ backgroundColor: ROLE_COLORS[emp.role] }}>{emp.code}</span>
+                  </td>
+                  <td className="py-2 px-1.5 font-semibold text-gray-900 dark:text-white">{emp.name}</td>
+                  {filters.roleLevel !== 'ASM' && (
+                    <td className="py-2 px-1.5 text-gray-500 text-[10px]">
+                      <span className="inline-flex items-center px-1 py-0.5 rounded text-[8px] font-bold text-white mr-1" style={{ backgroundColor: ROLE_COLORS[emp.parentRole] || '#999' }}>{emp.parentRole}</span>
+                      {emp.parentName}
+                    </td>
+                  )}
+                  <td className="py-2 px-1.5 text-right font-mono font-semibold text-indigo-600 dark:text-indigo-400">{formatVND(emp.revenue)}đ</td>
+                  <td className="py-2 px-1.5 text-right font-mono text-gray-400">{formatVND(emp.tRevenue)}đ</td>
+                  <td className={`py-2 px-1.5 text-right font-mono font-bold ${achColor(emp.revenue, emp.tRevenue)}`}>{achPct(emp.revenue, emp.tRevenue)}</td>
+                  <td className="py-2 px-1.5 text-right font-mono text-gray-700 dark:text-gray-300">
+                    {emp.orders}<span className="text-gray-400">/{emp.tOrders}</span>
+                  </td>
+                  <td className={`py-2 px-1.5 text-right font-mono ${achColor(emp.skuPerOrder, emp.tSku)}`}>
+                    {emp.skuPerOrder}<span className="text-gray-400">/{emp.tSku}</span>
+                  </td>
+                  <td className={`py-2 px-1.5 text-right font-mono ${achColor(emp.dropsize, emp.tDropsize)}`}>
+                    {formatVND(emp.dropsize)}<span className="text-gray-400 text-[9px]">/{formatVND(emp.tDropsize)}</span>
+                  </td>
+                  <td className={`py-2 px-1.5 text-right font-mono ${achColor(emp.vpo, emp.tVpo)}`}>
+                    {formatVND(emp.vpo)}<span className="text-gray-400 text-[9px]">/{formatVND(emp.tVpo)}</span>
+                  </td>
+                  <td className={`py-2 px-1.5 text-right font-mono ${achColor(emp.pc, emp.tPc)}`}>
+                    {emp.pc}%<span className="text-gray-400">/{emp.tPc}%</span>
+                  </td>
+                  <td className="py-2 px-1.5 text-right font-mono text-gray-700 dark:text-gray-300">{emp.customers}</td>
                 </tr>
               ))}
-              {empTable.length === 0 && <tr><td colSpan={10} className="py-8 text-center text-gray-400">Không có dữ liệu phù hợp</td></tr>}
+              {empTable.length === 0 && <tr><td colSpan={13} className="py-8 text-center text-gray-400">Không có dữ liệu phù hợp</td></tr>}
             </tbody>
           </table>
+        </div>
+        <div className="flex items-center gap-4 mt-3 text-[10px] text-gray-400 border-t border-gray-100 dark:border-zinc-800 pt-2">
+          <span>Màu: <span className="text-emerald-600 font-bold">≥100%</span> | <span className="text-amber-600 font-bold">≥70%</span> | <span className="text-red-600 font-bold">&lt;70%</span> đạt target</span>
+          <span>Định dạng: <span className="font-mono">Thực/Target</span></span>
         </div>
       </ChartCard>
     </>

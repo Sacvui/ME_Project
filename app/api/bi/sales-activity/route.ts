@@ -66,7 +66,12 @@ export async function GET() {
       .select('*', { count: 'exact', head: true })
       .eq('status', 'Active');
 
-    // 5. Assemble orders with items
+    // 5. Targets
+    const { data: targets } = await supabase
+      .from('sales_targets')
+      .select('employee_id, month, revenue_target, orders_target, sku_per_order_target, dropsize_target, vpo_target, pc_target');
+
+    // 6. Assemble orders with items
     const orders = (ordersRaw || []).map(o => ({
       id: o.id,
       order_date: o.order_date,
@@ -81,7 +86,8 @@ export async function GET() {
       data: {
         orders,
         salesTeam: salesTeam || [],
-        totalCustomers: totalCustomers || 0
+        totalCustomers: totalCustomers || 0,
+        targets: targets || []
       }
     });
   } catch (error: any) {
