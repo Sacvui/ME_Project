@@ -1,21 +1,11 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+import { getSupabase } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   try {
-    if (!supabaseUrl || !supabaseAnonKey) {
-      return NextResponse.json({ 
-        success: false, 
-        error: 'Missing Supabase environment variables' 
-      }, { status: 500 });
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+    const supabase = getSupabase();
     const { searchParams } = new URL(request.url);
     const radiusInMeters = parseInt(searchParams.get('radius') || '500', 10);
     const province = searchParams.get('province') || null;
