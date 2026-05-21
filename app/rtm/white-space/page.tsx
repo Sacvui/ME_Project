@@ -38,6 +38,8 @@ export default function WhiteSpacePage() {
   // Filter States
   const [province, setProvince] = useState('TP. Hồ Chí Minh');
   const [district, setDistrict] = useState('');
+  const [regionVersion, setRegionVersion] = useState<'old'|'new'>('old');
+  const [districtsList, setDistrictsList] = useState<string[]>([]);
   
   const [flyToLoc, setFlyToLoc] = useState<{lat: number, lng: number, zoom?: number} | null>(null);
   const [mapRef, setMapRef] = useState<any>(null);
@@ -50,6 +52,27 @@ export default function WhiteSpacePage() {
     setUploadType(type);
     setIsUploadModalOpen(true);
   };
+
+  useEffect(() => {
+    // Gọi API lấy danh sách districts mỗi khi province hoặc regionVersion thay đổi
+    if (province) {
+      fetch(`/api/rtm/regions?province=${encodeURIComponent(province)}&version=${regionVersion}`)
+        .then(res => res.json())
+        .then(res => {
+          if (res.success) {
+            setDistrictsList(res.data);
+            // Nếu district đang chọn không nằm trong danh sách mới, reset nó
+            if (district && !res.data.includes(district)) {
+              setDistrict('');
+            }
+          }
+        })
+        .catch(console.error);
+    } else {
+      setDistrictsList([]);
+      setDistrict('');
+    }
+  }, [province, regionVersion]);
 
   useEffect(() => {
     import('leaflet').then((leaflet) => {
@@ -166,6 +189,21 @@ export default function WhiteSpacePage() {
           <div className="flex flex-wrap items-center gap-3 bg-gray-50 dark:bg-zinc-800 p-2 rounded-lg border border-gray-200 dark:border-zinc-700">
             <Filter className="w-4 h-4 text-gray-500 dark:text-gray-400" />
             
+            <div className="flex bg-white dark:bg-zinc-900 rounded-md border border-gray-300 dark:border-zinc-600 overflow-hidden text-sm">
+              <button 
+                onClick={() => setRegionVersion('old')}
+                className={`px-3 py-1 outline-none transition-colors ${regionVersion === 'old' ? 'bg-blue-100 text-blue-700 font-medium' : 'text-gray-600 hover:bg-gray-100'}`}
+              >
+                Hành chính Cũ
+              </button>
+              <button 
+                onClick={() => setRegionVersion('new')}
+                className={`px-3 py-1 outline-none transition-colors border-l border-gray-300 dark:border-zinc-600 ${regionVersion === 'new' ? 'bg-blue-100 text-blue-700 font-medium' : 'text-gray-600 hover:bg-gray-100'}`}
+              >
+                Mới
+              </button>
+            </div>
+            
             <select value={province} onChange={(e) => setProvince(e.target.value)} className="text-sm bg-white dark:bg-zinc-900 border border-gray-300 dark:border-zinc-600 rounded-md px-2 py-1 outline-none text-gray-900 dark:text-white">
               <option value="">Tất cả Tỉnh/Thành</option>
               {PROVINCES.map(p => <option key={p} value={p}>{p}</option>)}
@@ -173,15 +211,9 @@ export default function WhiteSpacePage() {
             
             <select value={district} onChange={(e) => setDistrict(e.target.value)} className="text-sm bg-white dark:bg-zinc-900 border border-gray-300 dark:border-zinc-600 rounded-md px-2 py-1 outline-none text-gray-900 dark:text-white">
               <option value="">Tất cả Quận/Huyện</option>
-              <option value="Quận 1">Quận 1</option>
-              <option value="Quận 3">Quận 3</option>
-              <option value="Quận 5">Quận 5</option>
-              <option value="Quận 6">Quận 6</option>
-              <option value="Quận 7">Quận 7</option>
-              <option value="Bình Thạnh">Bình Thạnh</option>
-              <option value="Gò Vấp">Gò Vấp</option>
-              <option value="Phú Nhuận">Phú Nhuận</option>
-              <option value="Thủ Đức">Thủ Đức</option>
+              {districtsList.map(d => (
+                <option key={d} value={d}>{d}</option>
+              ))}
             </select>
 
             <div className="w-px h-5 bg-gray-300 dark:bg-zinc-600 mx-1"></div>
