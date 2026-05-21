@@ -16,7 +16,7 @@ export default function WhiteSpacePage() {
 
   useEffect(() => {
     // Gọi API Route Next.js vừa viết ở trên để lấy danh sách vùng trắng bán kính 500m
-    fetch('/api/white-space?radius=500')
+    fetch('/api/rtm/white-space?radius=500')
       .then((res) => res.json())
       .then((resData) => {
         if (resData.success) setWhiteSpaces(resData.data || []);
