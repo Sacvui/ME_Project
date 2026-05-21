@@ -1,13 +1,15 @@
 'use client';
 
 import React, { useState } from 'react';
-import { TrendingUp, BarChart3, Store } from 'lucide-react';
+import { TrendingUp, BarChart3, Store, PieChart } from 'lucide-react';
 import OverviewDashboard from '@/components/bi/OverviewDashboard';
 import SalesActivityDashboard from '@/components/bi/SalesActivityDashboard';
+import ExecutiveSummaryDashboard from '@/components/bi/ExecutiveSummaryDashboard';
 
 const TABS = [
   { id: 'overview', label: 'Tổng quan', icon: BarChart3 },
   { id: 'sales-activity', label: 'Hoạt động Điểm bán', icon: Store },
+  { id: 'executive-summary', label: 'Báo cáo Tổng hợp (MV)', icon: PieChart },
 ];
 
 export default function BIPage() {
@@ -50,6 +52,7 @@ export default function BIPage() {
       {/* Dashboard Content */}
       {activeTab === 'overview' && <OverviewDashboard />}
       {activeTab === 'sales-activity' && <SalesActivityDashboard />}
+      {activeTab === 'executive-summary' && <ExecutiveSummaryDashboard />}
     </div>
   );
 }
