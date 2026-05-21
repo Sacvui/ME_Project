@@ -28,9 +28,9 @@ export default function Header() {
           <Link href="/" className="text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-zinc-800 px-3 py-1.5 rounded-full transition-colors hidden sm:flex">
             Trang Chủ
           </Link>
-          <button className="text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white p-2 rounded-full hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors">
+          <Link href="/settings" className="text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white p-2 rounded-full hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors">
             <Settings className="w-5 h-5" />
-          </button>
+          </Link>
         </div>
       </div>
     </header>
