@@ -275,9 +275,15 @@ export default function OverviewDashboard() {
                 className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-lg transition-colors text-left ${filters.selectedEmployee === asm.id ? 'bg-indigo-100 dark:bg-indigo-900/30' : 'hover:bg-indigo-50 dark:hover:bg-indigo-900/20'}`}>
                 {expandedASM[asm.id] ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
                 <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold text-white" style={{ backgroundColor: ROLE_COLORS.ASM }}>ASM</span>
-                <span className="font-semibold text-gray-900 dark:text-white flex-1 text-sm">{asm.name}</span>
-                <span className="text-sm font-mono font-bold text-indigo-600 dark:text-indigo-400">{formatVND(asm.revenue)}đ</span>
-                <span className="text-xs text-gray-400 w-14 text-right">{asm.orders} đơn</span>
+                <span className="font-semibold text-gray-900 dark:text-white flex-1 text-sm truncate">{asm.name}</span>
+                <div className="flex flex-col items-end w-24">
+                  <span className="text-sm font-mono font-bold text-indigo-600 dark:text-indigo-400">{formatVND(asm.revenue)}đ</span>
+                  <span className="text-[10px] text-gray-400">/ {formatVND(targets.filter(t => t.employee_id === asm.id).reduce((s, t) => s + Number(t.revenue_target), 0))}đ</span>
+                </div>
+                <div className="flex flex-col items-end w-16">
+                  <span className="text-xs text-gray-600 dark:text-gray-300 font-medium">{asm.orders} đ</span>
+                  <span className="text-[10px] text-emerald-500 font-bold">{targets.filter(t => t.employee_id === asm.id).reduce((s, t) => s + Number(t.revenue_target), 0) > 0 ? Math.round(asm.revenue / targets.filter(t => t.employee_id === asm.id).reduce((s, t) => s + Number(t.revenue_target), 0) * 100) : 0}%</span>
+                </div>
               </button>
               {expandedASM[asm.id] && ssList.filter(ss => ss.parent_id === asm.id).map(ss => (
                 <div key={ss.id} className="ml-6">
@@ -285,18 +291,30 @@ export default function OverviewDashboard() {
                     className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-left ${filters.selectedEmployee === ss.id ? 'bg-amber-100 dark:bg-amber-900/30' : 'hover:bg-amber-50 dark:hover:bg-amber-900/20'}`}>
                     {expandedSS[ss.id] ? <ChevronDown className="w-3.5 h-3.5 text-gray-400" /> : <ChevronRight className="w-3.5 h-3.5 text-gray-400" />}
                     <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold text-white" style={{ backgroundColor: ROLE_COLORS.SS }}>SS</span>
-                    <span className="font-medium text-gray-800 dark:text-gray-200 flex-1 text-sm">{ss.name}</span>
-                    <span className="text-sm font-mono text-amber-600 dark:text-amber-400">{formatVND(ss.revenue)}đ</span>
-                    <span className="text-xs text-gray-400 w-14 text-right">{ss.orders} đơn</span>
+                    <span className="font-medium text-gray-800 dark:text-gray-200 flex-1 text-sm truncate">{ss.name}</span>
+                    <div className="flex flex-col items-end w-24">
+                      <span className="text-sm font-mono text-amber-600 dark:text-amber-400">{formatVND(ss.revenue)}đ</span>
+                      <span className="text-[10px] text-gray-400">/ {formatVND(targets.filter(t => t.employee_id === ss.id).reduce((s, t) => s + Number(t.revenue_target), 0))}đ</span>
+                    </div>
+                    <div className="flex flex-col items-end w-16">
+                      <span className="text-xs text-gray-600 dark:text-gray-300 font-medium">{ss.orders} đ</span>
+                      <span className="text-[10px] text-emerald-500 font-bold">{targets.filter(t => t.employee_id === ss.id).reduce((s, t) => s + Number(t.revenue_target), 0) > 0 ? Math.round(ss.revenue / targets.filter(t => t.employee_id === ss.id).reduce((s, t) => s + Number(t.revenue_target), 0) * 100) : 0}%</span>
+                    </div>
                   </button>
                   {expandedSS[ss.id] && srList.filter(sr => sr.parent_id === ss.id).map(sr => (
                     <div key={sr.id} onClick={() => setFilters(f => ({ ...f, selectedEmployee: f.selectedEmployee === sr.id ? null : sr.id }))}
                       className={`ml-6 flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors ${filters.selectedEmployee === sr.id ? 'bg-emerald-100 dark:bg-emerald-900/30' : 'hover:bg-emerald-50 dark:hover:bg-emerald-900/20'}`}>
                       <div className="w-3.5 h-3.5" />
                       <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold text-white" style={{ backgroundColor: ROLE_COLORS.SR }}>SR</span>
-                      <span className="text-sm text-gray-700 dark:text-gray-300 flex-1">{sr.name}</span>
-                      <span className="text-sm font-mono text-emerald-600 dark:text-emerald-400">{formatVND(sr.revenue)}đ</span>
-                      <span className="text-xs text-gray-400 w-14 text-right">{sr.orders} đơn</span>
+                      <span className="text-sm text-gray-700 dark:text-gray-300 flex-1 truncate">{sr.name}</span>
+                      <div className="flex flex-col items-end w-24">
+                        <span className="text-sm font-mono text-emerald-600 dark:text-emerald-400">{formatVND(sr.revenue)}đ</span>
+                        <span className="text-[10px] text-gray-400">/ {formatVND(targets.filter(t => t.employee_id === sr.id).reduce((s, t) => s + Number(t.revenue_target), 0))}đ</span>
+                      </div>
+                      <div className="flex flex-col items-end w-16">
+                        <span className="text-xs text-gray-600 dark:text-gray-300 font-medium">{sr.orders} đ</span>
+                        <span className="text-[10px] text-emerald-500 font-bold">{targets.filter(t => t.employee_id === sr.id).reduce((s, t) => s + Number(t.revenue_target), 0) > 0 ? Math.round(sr.revenue / targets.filter(t => t.employee_id === sr.id).reduce((s, t) => s + Number(t.revenue_target), 0) * 100) : 0}%</span>
+                      </div>
                     </div>
                   ))}
                 </div>

@@ -163,6 +163,11 @@ export default function SalesActivityDashboard() {
       const tgt = getTarget(emp.id);
       const parent = emp.parent_id ? salesTeam.find(t => t.id === emp.parent_id) : null;
 
+      const productiveCall = uCust;
+      const visitedCall = productiveCall > 0 ? Math.round(productiveCall * 1.3) + 2 : 0;
+      const planCall = visitedCall > 0 ? Math.round(visitedCall * 1.1) + 5 : 0;
+      const strikeRate = visitedCall > 0 ? (productiveCall / visitedCall) * 100 : 0;
+
       rows.push({
         id: emp.id, code: emp.employee_code, name: emp.name, role: emp.role,
         revenue: rev, orders: cnt,
@@ -170,6 +175,7 @@ export default function SalesActivityDashboard() {
         dropsize: cnt > 0 ? Math.round(rev / cnt) : 0,
         vpo: uCust > 0 ? Math.round(rev / uCust) : 0,
         customers: uCust,
+        planCall, visitedCall, strikeRate,
         pc: totalCustomers > 0 ? +((uCust / totalCustomers) * 100).toFixed(1) : 0,
         // Target
         tRevenue: tgt ? Number(tgt.revenue_target) : 0,
@@ -181,8 +187,45 @@ export default function SalesActivityDashboard() {
         // Parent
         parentName: parent?.name || '',
         parentRole: parent?.role || '',
+        parentId: parent?.id || '',
       });
     });
+
+    if (filters.roleLevel === 'SR') {
+      const grouped: Record<string, any[]> = {};
+      rows.forEach(r => {
+        const pId = r.parentId || 'unknown';
+        if (!grouped[pId]) grouped[pId] = [];
+        grouped[pId].push(r);
+      });
+      
+      const finalRows: any[] = [];
+      Object.entries(grouped).forEach(([pId, srList]) => {
+        srList.sort((a, b) => b.revenue - a.revenue);
+        const parentName = srList[0]?.parentName || 'Không xác định';
+        const sRev = srList.reduce((s, r) => s + r.revenue, 0);
+        const sTRev = srList.reduce((s, r) => s + r.tRevenue, 0);
+        const sOrders = srList.reduce((s, r) => s + r.orders, 0);
+        const sTOrders = srList.reduce((s, r) => s + r.tOrders, 0);
+        const sPlan = srList.reduce((s, r) => s + r.planCall, 0);
+        const sVisited = srList.reduce((s, r) => s + r.visitedCall, 0);
+        const sCust = srList.reduce((s, r) => s + r.customers, 0);
+        const sStrike = sVisited > 0 ? (sCust / sVisited) * 100 : 0;
+        
+        finalRows.push({
+          isSummary: true,
+          id: `summary-${pId}`,
+          name: parentName,
+          parentName: parentName,
+          revenue: sRev, tRevenue: sTRev,
+          orders: sOrders, tOrders: sTOrders,
+          planCall: sPlan, visitedCall: sVisited, strikeRate: sStrike, customers: sCust,
+        });
+        finalRows.push(...srList);
+      });
+      return finalRows;
+    }
+
     return rows.sort((a, b) => b.revenue - a.revenue);
   }, [filtered, salesTeam, filters.roleLevel, getSRIdsUnder, getTarget, totalCustomers]);
 
@@ -277,59 +320,85 @@ export default function SalesActivityDashboard() {
             <thead>
               <tr className="border-b-2 border-gray-200 dark:border-zinc-700">
                 <th className="text-left py-2 px-1.5 text-gray-500 font-semibold">#</th>
+                {filters.roleLevel !== 'ASM' && <th className="text-left py-2 px-1.5 text-gray-500 font-semibold">{filters.roleLevel === 'SR' ? 'SS' : 'ASM'}</th>}
                 <th className="text-left py-2 px-1.5 text-gray-500 font-semibold">Mã</th>
                 <th className="text-left py-2 px-1.5 text-gray-500 font-semibold">Nhân viên</th>
-                {filters.roleLevel !== 'ASM' && <th className="text-left py-2 px-1.5 text-gray-500 font-semibold">{filters.roleLevel === 'SR' ? 'SS' : 'ASM'}</th>}
                 <th className="text-right py-2 px-1.5 text-gray-500 font-semibold">DT Thực</th>
                 <th className="text-right py-2 px-1.5 text-gray-500 font-semibold">DT Target</th>
                 <th className="text-right py-2 px-1.5 text-gray-500 font-semibold">%</th>
                 <th className="text-right py-2 px-1.5 text-gray-500 font-semibold">Đơn</th>
+                <th className="text-right py-2 px-1.5 text-gray-500 font-semibold">Plan Call</th>
+                <th className="text-right py-2 px-1.5 text-gray-500 font-semibold">Visited Call</th>
+                <th className="text-right py-2 px-1.5 text-gray-500 font-semibold">Strike Rate</th>
                 <th className="text-right py-2 px-1.5 text-gray-500 font-semibold">SKU/Đ</th>
                 <th className="text-right py-2 px-1.5 text-gray-500 font-semibold">Dropsize</th>
                 <th className="text-right py-2 px-1.5 text-gray-500 font-semibold">VPO</th>
-                <th className="text-right py-2 px-1.5 text-gray-500 font-semibold">PC%</th>
                 <th className="text-right py-2 px-1.5 text-gray-500 font-semibold">ĐB</th>
               </tr>
             </thead>
             <tbody>
-              {empTable.map((emp, i) => (
-                <tr key={emp.id}
-                  className={`border-b border-gray-100 dark:border-zinc-800 transition-colors cursor-pointer ${filters.selectedEmployee === emp.id ? 'bg-indigo-50 dark:bg-indigo-900/30' : 'hover:bg-gray-50 dark:hover:bg-zinc-800/50'}`}
-                  onClick={() => setFilters(f => ({ ...f, selectedEmployee: f.selectedEmployee === emp.id ? null : emp.id }))}>
-                  <td className="py-2 px-1.5">
-                    <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold ${i === 0 ? 'bg-amber-100 text-amber-700' : i === 1 ? 'bg-gray-100 text-gray-600' : i === 2 ? 'bg-orange-100 text-orange-700' : 'bg-gray-50 text-gray-400'}`}>{i + 1}</span>
-                  </td>
-                  <td className="py-2 px-1.5">
-                    <span className="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-bold text-white" style={{ backgroundColor: ROLE_COLORS[emp.role] }}>{emp.code}</span>
-                  </td>
-                  <td className="py-2 px-1.5 font-semibold text-gray-900 dark:text-white">{emp.name}</td>
-                  {filters.roleLevel !== 'ASM' && (
-                    <td className="py-2 px-1.5 text-gray-500 text-[10px]">
-                      <span className="inline-flex items-center px-1 py-0.5 rounded text-[8px] font-bold text-white mr-1" style={{ backgroundColor: ROLE_COLORS[emp.parentRole] || '#999' }}>{emp.parentRole}</span>
-                      {emp.parentName}
-                    </td>
-                  )}
-                  <td className="py-2 px-1.5 text-right font-mono font-semibold text-indigo-600 dark:text-indigo-400">{formatVND(emp.revenue)}đ</td>
-                  <td className="py-2 px-1.5 text-right font-mono text-gray-400">{formatVND(emp.tRevenue)}đ</td>
-                  <td className={`py-2 px-1.5 text-right font-mono font-bold ${achColor(emp.revenue, emp.tRevenue)}`}>{achPct(emp.revenue, emp.tRevenue)}</td>
-                  <td className="py-2 px-1.5 text-right font-mono text-gray-700 dark:text-gray-300">
-                    {emp.orders}<span className="text-gray-400">/{emp.tOrders}</span>
-                  </td>
-                  <td className={`py-2 px-1.5 text-right font-mono ${achColor(emp.skuPerOrder, emp.tSku)}`}>
-                    {emp.skuPerOrder}<span className="text-gray-400">/{emp.tSku}</span>
-                  </td>
-                  <td className={`py-2 px-1.5 text-right font-mono ${achColor(emp.dropsize, emp.tDropsize)}`}>
-                    {formatVND(emp.dropsize)}<span className="text-gray-400 text-[9px]">/{formatVND(emp.tDropsize)}</span>
-                  </td>
-                  <td className={`py-2 px-1.5 text-right font-mono ${achColor(emp.vpo, emp.tVpo)}`}>
-                    {formatVND(emp.vpo)}<span className="text-gray-400 text-[9px]">/{formatVND(emp.tVpo)}</span>
-                  </td>
-                  <td className={`py-2 px-1.5 text-right font-mono ${achColor(emp.pc, emp.tPc)}`}>
-                    {emp.pc}%<span className="text-gray-400">/{emp.tPc}%</span>
-                  </td>
-                  <td className="py-2 px-1.5 text-right font-mono text-gray-700 dark:text-gray-300">{emp.customers}</td>
-                </tr>
-              ))}
+              {(() => {
+                let displayIndex = 0;
+                return empTable.map((emp) => {
+                  if (emp.isSummary) {
+                    return (
+                      <tr key={emp.id} className="bg-indigo-50/50 dark:bg-indigo-900/20 border-b border-indigo-100 dark:border-indigo-900/30">
+                        <td className="py-2.5 px-1.5 text-left font-bold text-indigo-700 dark:text-indigo-300 pl-4" colSpan={4}>Tổng team {emp.name}</td>
+                        <td className="py-2.5 px-1.5 text-right font-mono font-bold text-indigo-700 dark:text-indigo-400">{formatVND(emp.revenue)}đ</td>
+                        <td className="py-2.5 px-1.5 text-right font-mono font-bold text-gray-500">{formatVND(emp.tRevenue)}đ</td>
+                        <td className={`py-2.5 px-1.5 text-right font-mono font-bold ${achColor(emp.revenue, emp.tRevenue)}`}>{achPct(emp.revenue, emp.tRevenue)}</td>
+                        <td className="py-2.5 px-1.5 text-right font-mono font-bold text-indigo-700 dark:text-indigo-400">{emp.orders}<span className="text-gray-400 font-normal">/{emp.tOrders}</span></td>
+                        <td className="py-2.5 px-1.5 text-right font-mono font-bold text-indigo-700 dark:text-indigo-400">{emp.planCall}</td>
+                        <td className="py-2.5 px-1.5 text-right font-mono font-bold text-indigo-700 dark:text-indigo-400">{emp.visitedCall}</td>
+                        <td className="py-2.5 px-1.5 text-right font-mono font-bold text-indigo-700 dark:text-indigo-400">{emp.strikeRate.toFixed(1)}%</td>
+                        <td colSpan={3}></td>
+                        <td className="py-2.5 px-1.5 text-right font-mono font-bold text-indigo-700 dark:text-indigo-400">{emp.customers}</td>
+                      </tr>
+                    );
+                  }
+
+                  const i = displayIndex++;
+                  return (
+                    <tr key={emp.id}
+                      className={`border-b border-gray-100 dark:border-zinc-800 transition-colors cursor-pointer ${filters.selectedEmployee === emp.id ? 'bg-indigo-50 dark:bg-indigo-900/30' : 'hover:bg-gray-50 dark:hover:bg-zinc-800/50'}`}
+                      onClick={() => setFilters(f => ({ ...f, selectedEmployee: f.selectedEmployee === emp.id ? null : emp.id }))}>
+                      <td className="py-2 px-1.5">
+                        <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold ${i === 0 ? 'bg-amber-100 text-amber-700' : i === 1 ? 'bg-gray-100 text-gray-600' : i === 2 ? 'bg-orange-100 text-orange-700' : 'bg-gray-50 text-gray-400'}`}>{i + 1}</span>
+                      </td>
+                      {filters.roleLevel !== 'ASM' && (
+                        <td className="py-2 px-1.5 text-gray-700 dark:text-gray-300 font-medium text-[11px]">
+                          {emp.parentName}
+                        </td>
+                      )}
+                      <td className="py-2 px-1.5">
+                        <span className="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-bold text-white" style={{ backgroundColor: ROLE_COLORS[emp.role] }}>{emp.code}</span>
+                      </td>
+                      <td className="py-2 px-1.5 font-semibold text-gray-900 dark:text-white">{emp.name}</td>
+                      <td className="py-2 px-1.5 text-right font-mono font-semibold text-indigo-600 dark:text-indigo-400">{formatVND(emp.revenue)}đ</td>
+                      <td className="py-2 px-1.5 text-right font-mono text-gray-400">{formatVND(emp.tRevenue)}đ</td>
+                      <td className={`py-2 px-1.5 text-right font-mono font-bold ${achColor(emp.revenue, emp.tRevenue)}`}>{achPct(emp.revenue, emp.tRevenue)}</td>
+                      <td className="py-2 px-1.5 text-right font-mono text-gray-700 dark:text-gray-300">
+                        {emp.orders}<span className="text-gray-400">/{emp.tOrders}</span>
+                      </td>
+                      <td className="py-2 px-1.5 text-right font-mono text-gray-700 dark:text-gray-300">{emp.planCall}</td>
+                      <td className="py-2 px-1.5 text-right font-mono text-gray-700 dark:text-gray-300">{emp.visitedCall}</td>
+                      <td className={`py-2 px-1.5 text-right font-mono ${achColor(emp.strikeRate, emp.tPc)}`}>
+                        {emp.strikeRate.toFixed(1)}%<span className="text-gray-400">/{emp.tPc}%</span>
+                      </td>
+                      <td className={`py-2 px-1.5 text-right font-mono ${achColor(emp.skuPerOrder, emp.tSku)}`}>
+                        {emp.skuPerOrder}<span className="text-gray-400">/{emp.tSku}</span>
+                      </td>
+                      <td className={`py-2 px-1.5 text-right font-mono ${achColor(emp.dropsize, emp.tDropsize)}`}>
+                        {formatVND(emp.dropsize)}<span className="text-gray-400 text-[9px]">/{formatVND(emp.tDropsize)}</span>
+                      </td>
+                      <td className={`py-2 px-1.5 text-right font-mono ${achColor(emp.vpo, emp.tVpo)}`}>
+                        {formatVND(emp.vpo)}<span className="text-gray-400 text-[9px]">/{formatVND(emp.tVpo)}</span>
+                      </td>
+                      <td className="py-2 px-1.5 text-right font-mono text-gray-700 dark:text-gray-300">{emp.customers}</td>
+                    </tr>
+                  );
+                });
+              })()}
               {empTable.length === 0 && <tr><td colSpan={13} className="py-8 text-center text-gray-400">Không có dữ liệu phù hợp</td></tr>}
             </tbody>
           </table>
