@@ -1,34 +1,46 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder_key';
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   try {
-    // Truy vấn bảng customers và chuyển location từ hình học (geometry) sang vĩ độ/kinh độ
-    // Chúng ta có thể dùng raw query hoặc truy vấn đơn giản bằng postgREST nếu có view
-    // Do location lưu dạng PostGIS, st_y và st_x được hỗ trợ. Tuy nhiên Supabase PostgREST 
-    // không hỗ trợ hàm PostGIS trực tiếp trong `.select()`.
-    // Vì vậy ta nên lấy dữ liệu rồi tính toán, hoặc tốt nhất là tạo một RPC / View.
-    // Nếu chưa có RPC, chúng ta có thể parse chuỗi hex/wkb từ Supabase JS.
-    
+    if (!supabaseUrl || !supabaseAnonKey) {
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Missing Supabase environment variables' 
+      }, { status: 500 });
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
     const { searchParams } = new URL(request.url);
     const province = searchParams.get('province') || null;
     const district = searchParams.get('district') || null;
 
     const { data: customers, error } = await supabase.rpc('get_customers', {
-      p_province: province,
-      p_district: district
+      p_province: province && province.trim() !== '' ? province : null,
+      p_district: district && district.trim() !== '' ? district : null
     });
 
-    if (error) throw error;
+    if (error) {
+      console.error('get_customers RPC error:', JSON.stringify(error));
+      return NextResponse.json({ 
+        success: false, 
+        error: error.message,
+        details: error.details,
+        hint: error.hint
+      }, { status: 500 });
+    }
 
-    return NextResponse.json({ success: true, data: customers });
+    return NextResponse.json({ success: true, data: customers || [] });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    console.error('customers route catch:', error);
+    return NextResponse.json({ 
+      success: false, 
+      error: error.message || 'Unknown error' 
+    }, { status: 500 });
   }
 }

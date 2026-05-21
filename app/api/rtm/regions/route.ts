@@ -1,14 +1,22 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder_key';
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   try {
+    if (!supabaseUrl || !supabaseAnonKey) {
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Missing Supabase environment variables',
+        data: [] 
+      }, { status: 500 });
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
     const { searchParams } = new URL(request.url);
     const province = searchParams.get('province');
     const version = searchParams.get('version') || 'old';
@@ -25,7 +33,6 @@ export async function GET(request: Request) {
       .single();
 
     if (provError || !provData) {
-      // Nếu không tìm thấy Tỉnh/Thành trong DB, trả về rỗng
       return NextResponse.json({ success: true, data: [] });
     }
 
@@ -37,13 +44,17 @@ export async function GET(request: Request) {
       .eq('version', version)
       .order('name', { ascending: true });
 
-    if (error) throw error;
+    if (error) {
+      console.error('districts query error:', JSON.stringify(error));
+      return NextResponse.json({ success: false, error: error.message, data: [] }, { status: 500 });
+    }
 
     return NextResponse.json({ 
       success: true, 
-      data: districts.map(d => d.name) 
+      data: (districts || []).map(d => d.name) 
     });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    console.error('regions route catch:', error);
+    return NextResponse.json({ success: false, error: error.message, data: [] }, { status: 500 });
   }
 }
